@@ -54,33 +54,48 @@ def save_waterfall_trace(trace_data: list):
     print(f"📊 [OBSERVABILITY]: Đã lưu {len(trace_data)} sự kiện Waterfall Trace tại '{trace_path}'!")
 
 
-def run_baseline_chatbot(user_query: str, provider):
+def run_baseline_chatbot(user_query: str, provider) -> list:
     """Chạy Chatbot gốc (Cấp 2) không có công cụ gọi Tool"""
-    print(f"\n💬 [CHATBOT BASELINE] Câu hỏi: {user_query}")
+    print(f"\n💬 [CHATBOT BASELINE - CẤP 2] Câu hỏi: {user_query}")
+    start_time = time.time()
     response = provider.generate(user_query, system_prompt=CHATBOT_BASELINE_PROMPT)
-    print(f"🤖 Chatbot phản hồi:\n{response}")
+    latency_ms = round((time.time() - start_time) * 1000, 2)
+    print(f"🤖 Chatbot Cấp 2 phản hồi:\n{response}")
+    return [{
+        "step": 1,
+        "query": user_query,
+        "action_type": "BASELINE_TEXT_ONLY",
+        "thought": "Hệ thống Cấp 2 (Chatbot Baseline): Không có Tool hay giao thức MCP. Chỉ dùng System Prompt tĩnh.",
+        "output": response,
+        "latency_ms": latency_ms
+    }]
 
 
-def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) -> list:
+def run_react_agent(user_query: str, provider, mcp_server, max_iterations: int = None) -> list:
     """
     [REACT AGENT LOOP] Thực thi vòng lặp Thought -> Action -> Observation với MCP Server
+    Có cơ chế Max Loop (Circuit Breaker) chống lặp vô tận.
     Trả về danh sách trace log của phiên thực thi.
     """
-    print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query}")
+    if max_iterations is None:
+        try:
+            max_iterations = int(os.getenv("MAX_ITERATIONS", MAX_ITERATIONS))
+        except (ValueError, TypeError):
+            max_iterations = MAX_ITERATIONS
+
+    print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query} (Max Loop: {max_iterations})")
     
     step = 0
     trace_logs = []
+    observations_history = []
+    executed_tools = []
     tools_list = mcp_server.list_tools()
     request_prompt = user_query
-    booking_requested = any(
-        phrase in user_query.lower()
-        for phrase in ("đặt lịch", "lịch tư vấn", "đặt hẹn", "hẹn tư vấn")
-    )
     
-    while step < MAX_ITERATIONS:
+    while step < max_iterations:
         step += 1
         step_start_time = time.time()
-        print(f"\n--- 🔄 Vòng lặp ReAct Loop (Step {step}/{MAX_ITERATIONS}) ---")
+        print(f"\n--- 🔄 Vòng lặp ReAct Loop (Step {step}/{max_iterations}) ---")
         
         # Gọi LLM với Native Tool Calling Specs
         llm_response = provider.generate_with_tools(request_prompt, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
@@ -114,32 +129,6 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
             mcp_result = mcp_server.call_tool(tool_name, arguments)
             obs_data = mcp_result.get("result", {})
             
-            if not obs_data:
-                print(f"👁️ [Observation từ MCP Server]: {{}}")
-                print(f"⚠️ [CHÚ Ý]: MCP Server trả về kết quả rỗng! Học viên cần hoàn thành TODO 2.1 trong 'src/mcp_server.py'.")
-                final_answer = "Chưa thể trả lời chi tiết do chưa nhận được dữ liệu từ MCP Server (hãy hoàn thành TODO 2.1)."
-            else:
-                obs_str = json.dumps(obs_data, ensure_ascii=False)
-                print(f"👁️ [Observation từ MCP Server]: {obs_str}")
-                
-                # Tổng hợp Final Answer từ kết quả Observation thực tế
-                if obs_data.get("status") == "SUCCESS":
-                    if "data" in obs_data:
-                        d = obs_data["data"]
-                        final_answer = (
-                            f"Kết quả tra cứu cho sinh viên {obs_data.get('student_id', '')} ({d.get('full_name', '')}): "
-                            f"Lớp {d.get('class', '')}, GPA: {d.get('gpa', '')}, Email: {d.get('email', '')}, "
-                            f"Trạng thái: {d.get('status', '')}, Cố vấn: {d.get('advisor', '')}."
-                        )
-                    elif "message" in obs_data:
-                        final_answer = obs_data["message"]
-                    else:
-                        final_answer = f"Đã hoàn tất xử lý qua MCP Server: {json.dumps(obs_data, ensure_ascii=False)}"
-                elif obs_data.get("status") == "NOT_FOUND":
-                    final_answer = obs_data.get("message", "Không tìm thấy thông tin sinh viên yêu cầu.")
-                else:
-                    final_answer = f"Phản hồi từ công cụ: {json.dumps(obs_data, ensure_ascii=False)}"
-            
             trace_logs.append({
                 "step": step,
                 "query": user_query,
@@ -149,35 +138,119 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 "observation": obs_data,
                 "latency_ms": latency_ms
             })
-
-            if (
-                tool_name == "academic_query"
-                and booking_requested
-                and obs_data.get("status") == "SUCCESS"
-            ):
-                advisor_name = obs_data.get("data", {}).get("advisor", "")
-                request_prompt = (
-                    f"Yêu cầu ban đầu: {user_query}\n"
-                    f"Kết quả tra cứu sinh viên: {json.dumps(obs_data, ensure_ascii=False)}\n"
-                    f"Hãy tiếp tục thực hiện yêu cầu đặt lịch bằng tool schedule_appointment. "
-                    f"Dùng cố vấn học tập '{advisor_name}' và giữ nguyên mã sinh viên cùng thời gian người dùng đã yêu cầu."
-                )
-                print("🧠 [Thought]: Đã xác nhận cố vấn. Tiếp tục gọi tool đặt lịch theo yêu cầu.")
-                continue
             
-            # Kết thúc vòng lặp sau khi hoàn tất Observation và xuất Final Answer
-            print(f"🧠 [Thought]: Đã nhận được dữ liệu từ MCP Server. Tổng hợp kết quả phản hồi.")
+            executed_tools.append(tool_name)
+            observations_history.append({
+                "tool": tool_name,
+                "arguments": arguments,
+                "observation": obs_data
+            })
+
+            if not obs_data:
+                print(f"👁️ [Observation từ MCP Server]: {{}}")
+                print(f"⚠️ [CHÚ Ý]: MCP Server trả về kết quả rỗng!")
+            else:
+                obs_str = json.dumps(obs_data, ensure_ascii=False)
+                print(f"👁️ [Observation từ MCP Server]: {obs_str}")
+
+            # Kiểm tra xem có cần tiếp tục chuỗi Multi-step hay không
+            q_lower = user_query.lower()
+            needs_scholarship = ("học bổng" in q_lower or "dean's list" in q_lower) and "check_scholarship_eligibility" not in executed_tools
+            needs_course = ("môn" in q_lower or "tiên quyết" in q_lower or "đồ án" in q_lower) and "check_course_eligibility" not in executed_tools
+            needs_booking = any(p in q_lower for p in ("đặt lịch", "lịch tư vấn", "đặt hẹn", "hẹn")) and "schedule_appointment" not in executed_tools
+
+            # Nếu sinh viên không tồn tại thì dừng ngay
+            if obs_data.get("status") == "NOT_FOUND":
+                needs_scholarship = False
+                needs_course = False
+                needs_booking = False
+
+            if (needs_scholarship or needs_course or needs_booking) and step < max_iterations:
+                # Tìm tên cố vấn từ bước tra cứu sinh viên trước đó nếu có
+                advisor_name = "PGS.TS Nguyễn Văn A"
+                for o in observations_history:
+                    if o["tool"] == "academic_query" and o["observation"].get("status") == "SUCCESS":
+                        advisor_name = o["observation"].get("data", {}).get("advisor", advisor_name)
+
+                request_prompt = (
+                    f"Yêu cầu ban đầu của người dùng: {user_query}\n"
+                    f"Lịch sử thực thi các bước trước: {json.dumps(observations_history, ensure_ascii=False)}\n"
+                    f"Cố vấn học tập được xác nhận: {advisor_name}\n"
+                    f"Hãy tiếp tục thực hiện bước tiếp theo còn lại trong yêu cầu."
+                )
+                print(f"🧠 [Thought]: Còn tác vụ tiếp theo trong chuỗi yêu cầu. Tiếp tục vòng lặp ReAct...")
+                time.sleep(1.2)
+                continue
+
+            # Tổng hợp Final Answer khi đã hoàn tất tất cả các bước
+            fallback_parts = []
+            for item in observations_history:
+                t = item["tool"]
+                o = item["observation"]
+                if t == "academic_query":
+                    if o.get("status") == "SUCCESS" and "data" in o:
+                        d = o["data"]
+                        fallback_parts.append(
+                            f"Sinh viên {o.get('student_id')} ({d.get('full_name')}): Lớp {d.get('class')}, "
+                            f"GPA: {d.get('gpa')}, Cố vấn: {d.get('advisor')}."
+                        )
+                    elif o.get("status") == "NOT_FOUND":
+                        fallback_parts.append(o.get("message", "Không tìm thấy sinh viên."))
+                elif t == "check_scholarship_eligibility":
+                    fallback_parts.append(o.get("message", "Đã kiểm tra học bổng."))
+                elif t == "check_course_eligibility":
+                    status_text = "Đủ điều kiện" if o.get("is_eligible") else "Chưa đủ điều kiện"
+                    fallback_parts.append(f"Môn {o.get('course_code')} ({o.get('course_name')}): {status_text}. {o.get('details')}")
+                elif t == "schedule_appointment":
+                    fallback_parts.append(o.get("message", "Đã đặt lịch hẹn."))
+                else:
+                    fallback_parts.append(json.dumps(o, ensure_ascii=False))
+
+            fallback_answer = "\n".join(fallback_parts)
+
+            summary_prompt = (
+                f"Câu hỏi ban đầu của sinh viên: {user_query}\n"
+                f"Dữ liệu thực tế từ MCP Server qua các bước:\n"
+                f"{json.dumps(observations_history, ensure_ascii=False, indent=2)}\n\n"
+                f"Hãy đóng vai Trợ lý Tác tử Học vụ VinUni, sử dụng dữ liệu trên để trả lời sinh viên một cách tự nhiên, "
+                f"chính xác, thân thiện và đầy đủ tất cả các ý trong câu hỏi. Tuyệt đối không bịa đặt thêm dữ liệu."
+            )
+            try:
+                gemini_text = provider.generate(summary_prompt, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
+                if gemini_text and not gemini_text.startswith("[Gemini Error]") and not gemini_text.startswith("[Gemini Exception]"):
+                    final_answer = gemini_text.strip()
+                else:
+                    final_answer = fallback_answer
+            except Exception:
+                final_answer = fallback_answer
+
+            print(f"🧠 [Thought]: Đã nhận đủ dữ liệu từ MCP Server. Tổng hợp kết quả phản hồi.")
             print(f"🏁 [Final Answer]: {final_answer}")
             
             trace_logs.append({
                 "step": step + 1,
                 "query": user_query,
                 "action_type": "FINAL_ANSWER",
-                "thought": "Tổng hợp kết quả từ MCP Server thành công.",
+                "thought": f"Tổng hợp kết quả từ {len(observations_history)} bước gọi tool MCP Server thành công.",
                 "output": final_answer,
                 "latency_ms": 10.0
             })
             break
+    else:
+        # Cơ chế Circuit Breaker khi vòng lặp chạm ngưỡng MAX_LOOP mà chưa có kết luận
+        stop_msg = (
+            f"⚠️ [CIRCUIT BREAKER - MAX LOOP REACHED]: Tác tử đã đạt giới hạn tối đa {max_iterations} vòng lặp ReAct. "
+            f"Hệ thống tự động dừng để tránh lặp vô tận (Infinite Loop Guard) và bảo toàn tài nguyên token."
+        )
+        print(f"\n🛑 {stop_msg}")
+        trace_logs.append({
+            "step": step,
+            "query": user_query,
+            "action_type": "MAX_LOOP_TERMINATION",
+            "thought": f"Đã chạm ngưỡng Max Loop = {max_iterations}. Kích hoạt ngắt mạch an toàn.",
+            "output": stop_msg,
+            "latency_ms": 0.0
+        })
 
     return trace_logs
 
@@ -195,13 +268,51 @@ if __name__ == "__main__":
     
     tests = load_test_cases()
     print(f"✅ Đã tải thành công {len(tests)} Test Cases thử nghiệm.\n")
+
+    # Phân tích tham số --level (Cấp 2: Chatbot | Cấp 3: ReAct Agent, mặc định là 3)
+    cli_level = 3
+    for idx, arg in enumerate(sys.argv):
+        if arg in ["--level", "-lvl", "--ai-level"] and idx + 1 < len(sys.argv):
+            if sys.argv[idx + 1] in ["2", "3"]:
+                cli_level = int(sys.argv[idx + 1])
+    current_level = cli_level
+
+    # Phân tích tham số --max-loop từ dòng lệnh (mặc định 5, cho phép chọn từ 1 đến 5 hoặc hơn)
+    cli_max_loop = None
+    for idx, arg in enumerate(sys.argv):
+        if arg in ["--max-loop", "--maxloop", "-l", "--max-iterations"] and idx + 1 < len(sys.argv):
+            try:
+                cli_max_loop = max(1, min(10, int(sys.argv[idx + 1])))
+            except ValueError:
+                pass
     
-    if "--interactive" in sys.argv:
-        print("🎮 [INTERACTIVE MODE] Trò chuyện trực tiếp với ReAct Agent:")
-        print("💡 Gợi ý câu hỏi thử nghiệm:")
+    current_max_loop = cli_max_loop or int(os.getenv("MAX_ITERATIONS", MAX_ITERATIONS))
+    
+    lvl_name = "Cấp 2: Chatbot Baseline (Không Tool)" if current_level == 2 else "Cấp 3: ReAct Agent (MCP-Enhanced)"
+    print(f"🎚️ [AI LEVEL CONFIG]: Chế độ hoạt động = {lvl_name}")
+    print(f"🛡️ [SAFETY CONFIG]: Max Loop Limit = {current_max_loop} iterations\n")
+    
+    query_arg = None
+    for idx, arg in enumerate(sys.argv):
+        if arg in ["-q", "--query"] and idx + 1 < len(sys.argv):
+            query_arg = sys.argv[idx + 1]
+
+    if query_arg:
+        print(f"🎯 [QUERY MODE] Thực thi câu hỏi từ dòng lệnh:")
+        if current_level == 2:
+            logs = run_baseline_chatbot(query_arg, provider)
+        else:
+            logs = run_react_agent(query_arg, provider, mcp_server, max_iterations=current_max_loop)
+        save_waterfall_trace(logs)
+    elif "--interactive" in sys.argv:
+        print("🎮 [INTERACTIVE MODE] Trò chuyện trực tiếp:")
+        print("💡 Gợi ý câu lệnh & câu hỏi thử nghiệm:")
+        print("   - Chuyển Cấp độ AI: gõ '/level 2' (Chatbot thuần) hoặc '/level 3' (ReAct Agent)")
+        print("   - Đổi Max Loop (1 - 5): gõ '/maxloop 2' hoặc '/maxloop 3'")
         print("   - Câu hỏi chung: 'Quy chế học vụ VinUni yêu cầu bao nhiêu tín chỉ?'")
-        print("   - Tra cứu học vụ: 'Hãy tra cứu thông tin học vụ của sinh viên SV2026001'")
-        print("   - Đặt lịch hẹn: 'Đặt lịch hẹn tư vấn cho SV2026001 vào 14:00 ngày 15/09/2026'")
+        print("   - Tra cứu học vụ: 'Hãy tra cứu thông tin học vụ của sinh viên 2A202602735'")
+        print("   - Xét học bổng: 'Kiểm tra học bổng của sinh viên 2A202602735'")
+        print("   - Đăng ký môn: 'Kiểm tra điều kiện học phần COMP3020 cho sinh viên 2A202602735'")
         print("   - Gõ 'exit' hoặc 'quit' để kết thúc phiên trò chuyện.\n")
         while True:
             try:
@@ -209,13 +320,35 @@ if __name__ == "__main__":
                 if not user_input or user_input.lower() in ["exit", "quit"]:
                     print("👋 Tạm biệt! Kết thúc phiên trò chuyện.")
                     break
-                logs = run_react_agent(user_input, provider, mcp_server)
+
+                if user_input.lower().startswith("/level"):
+                    parts = user_input.split()
+                    if len(parts) >= 2 and parts[1] in ["2", "3"]:
+                        current_level = int(parts[1])
+                        print(f"🔄 Đã chuyển sang: {'Cấp 2: Chatbot Baseline' if current_level == 2 else 'Cấp 3: ReAct Agent'}")
+                        continue
+
+                if user_input.lower().startswith("/maxloop"):
+                    parts = user_input.split()
+                    if len(parts) >= 2:
+                        try:
+                            current_max_loop = max(1, min(10, int(parts[1])))
+                            print(f"🔄 Đã cập nhật Max Loop: {current_max_loop}")
+                        except ValueError:
+                            print("⚠️ Vui lòng nhập số hợp lệ, ví dụ: /maxloop 3")
+                        continue
+
+                if current_level == 2:
+                    logs = run_baseline_chatbot(user_input, provider)
+                else:
+                    logs = run_react_agent(user_input, provider, mcp_server, max_iterations=current_max_loop)
                 save_waterfall_trace(logs)
-            except (KeyboardInterrupt, EOFError):
-                print("\n👋 Đã thoát phiên tương tác.")
+                print("-" * 50)
+            except KeyboardInterrupt:
+                print("\n👋 Tạm biệt!")
                 break
     elif "--all" in sys.argv:
-        print("🚀 [TEST SUITE MODE] Kiểm tra 5 Test Cases:")
+        print(f"🚀 [TEST SUITE MODE] Kiểm tra {len(tests)} Test Cases ({lvl_name} | Max Loop = {current_max_loop}):")
         completed_count = 0
         todo_count = 0
         all_traces = []
@@ -231,9 +364,13 @@ if __name__ == "__main__":
                 print(f"   👉 Hãy mở file 'config/test_cases.json' để viết câu hỏi thực tế cho Test Case này!")
                 todo_count += 1
             else:
-                logs = run_react_agent(tc["question"], provider, mcp_server)
+                if current_level == 2:
+                    logs = run_baseline_chatbot(tc["question"], provider)
+                else:
+                    logs = run_react_agent(tc["question"], provider, mcp_server, max_iterations=current_max_loop)
                 all_traces.extend(logs)
                 completed_count += 1
+                time.sleep(1.0)
                 
         print(f"\n==================================================")
         print(f"📊 [KẾT QUẢ TEST SUITE]: Đã thực thi {completed_count}/{len(tests)} Test Cases | {todo_count} Test Cases đang chờ điền câu hỏi (TODO)")
@@ -243,11 +380,16 @@ if __name__ == "__main__":
     else:
         # Chế độ mặc định khi chỉ gõ 'python src/app.py'
         print("ℹ️ HƯỚNG DẪN SỬ DỤNG CHƯƠNG TRÌNH:")
-        print("  1. Chat trực tiếp liên tục:   python src/app.py --interactive")
-        print("  2. Chạy toàn bộ Test Cases:    python src/app.py --all\n")
+        print("  1. Chat trực tiếp liên tục:    python src/app.py --interactive")
+        print("  2. Chọn Cấp độ (2 hoặc 3):      python src/app.py --level 2 --interactive")
+        print("  3. Tùy chọn Max Loop (1-5):     python src/app.py --max-loop 2 --interactive")
+        print("  4. Chạy toàn bộ Test Cases:     python src/app.py --all --level 3 --max-loop 5")
+        print("  5. Chạy 1 câu hỏi cụ thể:       python src/app.py -q \"câu hỏi của bạn\"\n")
         
         sample_query = tests[1]["question"]
-        print(f"--- 🏁 DEMO CHẠY THỬ 1 TEST CASE MẪU (TC02: Tra cứu học vụ) ---")
-        logs = run_react_agent(sample_query, provider, mcp_server)
+        if current_level == 2:
+            logs = run_baseline_chatbot(sample_query, provider)
+        else:
+            logs = run_react_agent(sample_query, provider, mcp_server, max_iterations=current_max_loop)
         save_waterfall_trace(logs)
         print("\n💡 Hãy thử ngay lệnh: python src/app.py --interactive để chat trực tiếp!")

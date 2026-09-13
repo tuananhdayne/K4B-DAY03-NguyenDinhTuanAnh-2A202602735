@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import re
+import time
 from typing import Dict, Any, List
 from dotenv import load_dotenv
 
@@ -33,63 +34,109 @@ class MockOfflineProvider(BaseLLMProvider):
         self.model_name = "Offline-Mock-Model-2026"
 
     def generate(self, prompt: str, system_prompt: str = "") -> str:
-        return f"[Mock Chatbot Response]: Xin chào! Tôi đã nhận được câu hỏi '{prompt}'. (Chế độ Chatbot không có Tool tra cứu dữ liệu thời gian thực)."
+        prompt_lower = prompt.lower()
+        if "mcp server" in prompt_lower or "dữ liệu thực tế" in prompt_lower or "tác tử học vụ vinuni" in prompt_lower:
+            return ""
+
+        if any(k in prompt_lower for k in ("sv", "2a", "gpa", "điểm", "học vụ", "cố vấn", "đặt lịch")):
+            return (
+                "Chào bạn! Tôi là Chatbot học vụ thuộc Đại học VinUni (Cấp 2 Baseline). "
+                "Xin lưu ý rằng tôi KHÔNG có quyền truy cập vào cơ sở dữ liệu học vụ thời gian thực và "
+                "KHÔNG có quyền đặt lịch hẹn. Tôi không thể tra cứu thông tin sinh viên hoặc đặt lịch tư vấn. "
+                "Bạn vui lòng liên hệ trực tiếp phòng Đào tạo (Registrar Office) để được hỗ trợ."
+            )
+        return "Chào bạn! Tôi là Chatbot học vụ VinUni. Về quy chế cơ bản: Sinh viên cần hoàn thành từ 120-135 tín chỉ theo hệ thống ECTS và duy trì GPA tối thiểu 2.0 để tốt nghiệp."
 
     def generate_with_tools(self, prompt: str, tools_schema: List[Dict[str, Any]], system_prompt: str = "") -> Dict[str, Any]:
         prompt_lower = prompt.lower()
-        student_match = re.search(r"\bSV\d+\b", prompt, re.IGNORECASE)
+        student_match = re.search(r"\b(?:SV\d+|2A\d+)\b", prompt, re.IGNORECASE)
         student_id = student_match.group(0).upper() if student_match else "SV2026001"
         time_match = re.search(r"\b\d{1,2}:\d{2}\b", prompt)
         date_match = re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", prompt)
         datetime_str = (
             f"{time_match.group(0)} {date_match.group(0)}"
             if time_match and date_match
-            else "14:00 15/09/2026"
+            else "14:00 20/09/2026"
         )
         advisor_name = next(
             (
                 name
-                for name in ("PGS.TS Nguyễn Văn A", "TS. Lê Thị B")
+                for name in (
+                    "GS.TS Vũ Hà Văn",
+                    "PGS.TS Nguyễn Văn A", 
+                    "TS. Lê Thị B", 
+                    "TS. Phạm Bảo Sơn", 
+                    "GS. Maurizio Cecconi", 
+                    "PGS.TS Sunita Sah"
+                )
                 if name.lower() in prompt_lower
             ),
             None
-        ) or "PGS.TS Nguyễn Văn A"
+        ) or ("GS.TS Vũ Hà Văn" if "2A202602735" in student_id else "PGS.TS Nguyễn Văn A")
 
-        multi_step_booking = (
-            "sau đó" in prompt_lower
-            and "đặt lịch" in prompt_lower
-            and "tra cứu" in prompt_lower
-        )
+        # Khai thác course code nếu có trong prompt
+        course_match = re.search(r"\b(COMP3020|AI4010|MED2030|COMP2010|MATH1020)\b", prompt, re.IGNORECASE)
+        course_code = course_match.group(0).upper() if course_match else "COMP3020"
 
-        if multi_step_booking and "kết quả tra cứu sinh viên" not in prompt_lower:
+        # Khai thác loại học bổng nếu có
+        scholarship_type = "TALENT_SCHOLARSHIP" if ("tài năng" in prompt_lower or "talent" in prompt_lower) else "DEANS_LIST"
+
+        # Kiểm tra lịch sử đã gọi các tools nào từ chuỗi JSON observations_history trong prompt
+        has_academic_obs = '"tool": "academic_query"' in prompt or "'tool': 'academic_query'" in prompt
+        has_scholarship_obs = '"tool": "check_scholarship_eligibility"' in prompt or "'tool': 'check_scholarship_eligibility'" in prompt
+        has_course_obs = '"tool": "check_course_eligibility"' in prompt or "'tool': 'check_course_eligibility'" in prompt
+        has_booking_obs = '"tool": "schedule_appointment"' in prompt or "'tool': 'schedule_appointment'" in prompt
+
+        # Xử lý chuỗi Multi-step & Task Detection
+        needs_academic = "tra cứu" in prompt_lower or "hồ sơ" in prompt_lower or "thông tin học vụ" in prompt_lower
+        needs_scholarship = "học bổng" in prompt_lower or "dean's list" in prompt_lower
+        needs_course = "tiên quyết" in prompt_lower or "môn" in prompt_lower or "đồ án" in prompt_lower or bool(course_match)
+        needs_booking = "đặt lịch" in prompt_lower or "lịch tư vấn" in prompt_lower or "hẹn" in prompt_lower
+
+        if needs_academic and not has_academic_obs:
             return {
                 "type": "tool_call",
                 "tool_name": "academic_query",
                 "arguments": {"student_id": student_id},
-                "thought": f"Tôi cần tra cứu cố vấn của {student_id} trước khi đặt lịch."
+                "thought": f"Tôi cần tra cứu hồ sơ học vụ của sinh viên {student_id} trước."
             }
-        
-        # Mô phỏng nhận diện intent gọi Tool
-        if "đặt lịch" in prompt_lower or "lịch tư vấn" in prompt_lower:
+
+        if needs_scholarship and not has_scholarship_obs:
+            return {
+                "type": "tool_call",
+                "tool_name": "check_scholarship_eligibility",
+                "arguments": {"student_id": student_id, "scholarship_type": scholarship_type},
+                "thought": f"Tôi tiến hành thẩm định điều kiện học bổng {scholarship_type} cho sinh viên {student_id}."
+            }
+
+        if needs_course and not has_course_obs and ("đăng ký" in prompt_lower or "tiên quyết" in prompt_lower or "đồ án" in prompt_lower or "nguyện vọng" in prompt_lower):
+            return {
+                "type": "tool_call",
+                "tool_name": "check_course_eligibility",
+                "arguments": {"student_id": student_id, "course_code": course_code},
+                "thought": f"Tôi kiểm tra điều kiện tiên quyết và tính khả dụng của môn {course_code} cho sinh viên {student_id}."
+            }
+
+        if needs_booking and not has_booking_obs:
             return {
                 "type": "tool_call",
                 "tool_name": "schedule_appointment",
                 "arguments": {"student_id": student_id, "datetime_str": datetime_str, "advisor_name": advisor_name},
-                "thought": f"Người dùng yêu cầu đặt lịch hẹn tư vấn cho sinh viên {student_id}. Tôi sẽ gọi tool schedule_appointment."
+                "thought": f"Tất cả các điều kiện đã được xác minh. Tôi tiến hành đặt lịch hẹn tư vấn cho {student_id} với {advisor_name}."
             }
-        elif student_match or "tra cứu" in prompt_lower:
-            return {
-                "type": "tool_call",
-                "tool_name": "academic_query",
-                "arguments": {"student_id": student_id},
-                "thought": f"Người dùng muốn tra cứu thông tin học vụ của sinh viên {student_id}. Tôi sẽ gọi tool academic_query."
-            }
-        else:
+
+        if not (needs_academic or needs_scholarship or needs_course or needs_booking):
             return {
                 "type": "text",
-                "content": f"[Mock Agent Response]: Xin chào! Quy chế học vụ VinUni yêu cầu sinh viên tích lũy tối thiểu 120 tín chỉ và duy trì GPA trên 2.0 để tốt nghiệp.",
+                "content": "[Mock Agent Response]: Xin chào! Tôi là Trợ lý Học vụ VinUni. Về quy chế cơ bản: Sinh viên cần hoàn thành tối thiểu 120 tín chỉ và duy trì GPA tối thiểu 2.0 để tốt nghiệp.",
                 "thought": "Câu hỏi chung về quy chế học vụ, trả lời trực tiếp không cần gọi Tool."
             }
+
+        return {
+            "type": "text",
+            "content": f"Đã hoàn tất toàn bộ quy trình xử lý cho sinh viên {student_id} qua MCP Server.",
+            "thought": "Tất cả các bước yêu cầu đã được thực thi thành công. Xuất Final Answer."
+        }
 
 
 class GeminiProvider(BaseLLMProvider):
@@ -101,14 +148,22 @@ class GeminiProvider(BaseLLMProvider):
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         if not self.api_key or self.api_key == "your_gemini_api_key_here":
             return "[Gemini Error]: Chưa cấu hình GEMINI_API_KEY trong file .env! Đang sử dụng chế độ Mock."
-        try:
-            from google import genai
-            client = genai.Client(api_key=self.api_key)
-            contents = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-            response = client.models.generate_content(model=self.model_name, contents=contents)
-            return response.text
-        except Exception as e:
-            return f"[Gemini Exception]: {str(e)}"
+        from google import genai
+        client = genai.Client(api_key=self.api_key)
+        contents = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(model=self.model_name, contents=contents)
+                return response.text or ""
+            except Exception as e:
+                err_msg = str(e)
+                if ("429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg) and attempt < 2:
+                    wait_sec = 2.5 * (attempt + 1)
+                    time.sleep(wait_sec)
+                    continue
+                print(f"⚠️ [Gemini API Note]: {err_msg[:60]}... Fallback về phản hồi Cấp 2.")
+                return MockOfflineProvider().generate(prompt, system_prompt)
+        return MockOfflineProvider().generate(prompt, system_prompt)
 
     def generate_with_tools(self, prompt: str, tools_schema: List[Dict[str, Any]], system_prompt: str = "") -> Dict[str, Any]:
         if not self.api_key or self.api_key == "your_gemini_api_key_here":
@@ -139,14 +194,26 @@ class GeminiProvider(BaseLLMProvider):
                 temperature=0.2
             )
 
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=config
-            )
+            response = None
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model=self.model_name,
+                        contents=prompt,
+                        config=config
+                    )
+                    break
+                except Exception as api_err:
+                    err_msg = str(api_err)
+                    if ("429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg) and attempt < 2:
+                        wait_sec = 3.0 * (attempt + 1)
+                        print(f"⏳ [Gemini Rate-Limit]: Chờ {wait_sec}s rồi thử lại với Gemini...")
+                        time.sleep(wait_sec)
+                        continue
+                    raise api_err
 
             # Kiểm tra xem Gemini có trả về Tool Call không
-            if response.function_calls:
+            if response and response.function_calls:
                 call = response.function_calls[0]
                 args = dict(call.args) if hasattr(call, 'args') and call.args else {}
                 return {
@@ -158,7 +225,7 @@ class GeminiProvider(BaseLLMProvider):
             else:
                 return {
                     "type": "text",
-                    "content": response.text or "",
+                    "content": (response.text if response else "") or "",
                     "thought": "Gemini phản hồi trực tiếp bằng văn bản (không cần gọi công cụ)."
                 }
 

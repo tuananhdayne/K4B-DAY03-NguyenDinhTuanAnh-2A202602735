@@ -33,5 +33,26 @@
     "question": "Hãy tra cứu thông tin học vụ của sinh viên SV9999999.",
     "expected_behavior": "Agent nhận kết quả NOT_FOUND từ Tool và đưa ra phản hồi lịch sự, chính xác không bịa đặt dữ liệu.",
     "complexity": "Medium"
+  },
+  {
+    "id": "TC06",
+    "type": "scholarship_and_booking_multi_step",
+    "question": "Hãy tra cứu học vụ của sinh viên 2A202602735, xét xem sinh viên có đủ điều kiện nhận Học bổng Dean's List không, và đặt lịch hẹn tư vấn với cố vấn học tập của sinh viên vào lúc 14:00 ngày 20/09/2026.",
+    "expected_behavior": "Agent thực hiện chuỗi 3 bước ReAct: 1) Tra cứu hồ sơ sinh viên 2A202602735; 2) Thẩm định học bổng DEANS_LIST; 3) Đặt lịch hẹn với GS.TS Vũ Hà Văn.",
+    "complexity": "High"
+  },
+  {
+    "id": "TC07",
+    "type": "course_prerequisite_audit",
+    "question": "Sinh viên SV2026002 có nguyện vọng đăng ký môn COMP3020 (Học sâu). Hãy kiểm tra xem sinh viên có đủ điều kiện tiên quyết không và giải thích lý do.",
+    "expected_behavior": "Agent gọi tool check_course_eligibility với mã SV2026002 và môn COMP3020, phát hiện sinh viên chưa học môn tiên quyết COMP2010 và đưa ra phản hồi.",
+    "complexity": "Medium"
+  },
+  {
+    "id": "TC08",
+    "type": "long_horizon_multi_task",
+    "question": "Kiểm tra hồ sơ học vụ sinh viên 2A202602735, xét học bổng Tài năng (TALENT_SCHOLARSHIP), kiểm tra điều kiện đăng ký đồ án tốt nghiệp AI4010, sau đó đặt lịch hẹn cố vấn lúc 15:30 ngày 22/09/2026.",
+    "expected_behavior": "Agent thực thi chuỗi tác tử 4 bước Long-Horizon: Tra cứu sinh viên -> Thẩm định học bổng tài năng -> Thẩm định đồ án AI4010 -> Đặt lịch hẹn cố vấn.",
+    "complexity": "Very High"
   }
 ]

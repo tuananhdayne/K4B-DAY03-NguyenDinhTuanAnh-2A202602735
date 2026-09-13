@@ -3,9 +3,9 @@
     "step": 1,
     "query": "Chào bạn, bạn có thể giới thiệu quy chế học vụ cơ bản của Đại học VinUni không?",
     "action_type": "FINAL_ANSWER",
-    "thought": "Câu hỏi chung về quy chế học vụ, trả lời trực tiếp không cần gọi Tool.",
-    "output": "[Mock Agent Response]: Xin chào! Quy chế học vụ VinUni yêu cầu sinh viên tích lũy tối thiểu 120 tín chỉ và duy trì GPA trên 2.0 để tốt nghiệp.",
-    "latency_ms": 2845.93
+    "thought": "Gemini phản hồi trực tiếp bằng văn bản (không cần gọi công cụ).",
+    "output": "Chào bạn, tôi là Trợ lý Tác tử Học vụ Thông minh của Đại học VinUni. Về quy chế học vụ cơ bản, bạn có thể tham khảo các thông tin sau:\n\n*   **Hệ thống tín chỉ:** VinUni áp dụng hệ thống tín chỉ ECTS (European Credit Transfer and Accumulation System), mỗi tín chỉ tương đương với khoảng 25-30 giờ học tập.\n*   **Cấu trúc chương trình:** Các chương trình đào tạo được thiết kế theo cấu trúc cử nhân, thạc sĩ và tiến sĩ, với các môn học đại cương, cơ sở ngành và chuyên ngành.\n*   **Đánh giá kết quả học tập:** Sinh viên được đánh giá thông qua nhiều hình thức như bài kiểm tra, bài tập lớn, dự án, thuyết trình và thi cuối kỳ. Thang điểm thường là A, B, C, D, F.\n*   **Điều kiện tốt nghiệp:** Để tốt nghiệp, sinh viên cần hoàn thành đủ số tín chỉ quy định, đạt điểm trung bình tích lũy tối thiểu và đáp ứng các yêu cầu khác của chương trình đào tạo (ví dụ: chuẩn đầu ra tiếng Anh, thực tập).\n*   **Cố vấn học tập:** Mỗi sinh viên đều có một cố vấn học tập để hỗ trợ trong quá trình học tập, định hướng nghề nghiệp và giải quyết các vấn đề liên quan đến học vụ.\n\nNếu bạn có câu hỏi cụ thể hơn về quy chế học vụ hoặc muốn tra cứu thông tin học vụ của mình, hãy cung cấp mã sinh viên nhé!",
+    "latency_ms": 7206.92
   },
   {
     "step": 1,
@@ -15,15 +15,126 @@
     "arguments": {
       "student_id": "SV2026001"
     },
-    "observation": {},
-    "latency_ms": 799.12
+    "observation": {
+      "status": "SUCCESS",
+      "student_id": "SV2026001",
+      "data": {
+        "full_name": "Nguyễn Văn An",
+        "class": "AI-K4",
+        "gpa": 3.85,
+        "email": "an.nv@vinuni.edu.vn",
+        "status": "Đang học",
+        "advisor": "PGS.TS Nguyễn Văn A"
+      }
+    },
+    "latency_ms": 4558.05
   },
   {
     "step": 2,
     "query": "Hãy tra cứu thông tin học vụ của sinh viên SV2026001.",
     "action_type": "FINAL_ANSWER",
     "thought": "Tổng hợp kết quả từ MCP Server thành công.",
-    "output": "Chưa thể trả lời chi tiết do chưa nhận được dữ liệu từ MCP Server (hãy hoàn thành TODO 2.1).",
+    "output": "Kết quả tra cứu cho sinh viên SV2026001 (Nguyễn Văn An): Lớp AI-K4, GPA: 3.85, Email: an.nv@vinuni.edu.vn, Trạng thái: Đang học, Cố vấn: PGS.TS Nguyễn Văn A.",
+    "latency_ms": 10.0
+  },
+  {
+    "step": 1,
+    "query": "Hãy đặt lịch tư vấn cho sinh viên SV2026001 với cố vấn PGS.TS Nguyễn Văn A lúc 14:00 ngày 15/09/2026.",
+    "action_type": "TOOL_EXECUTION",
+    "tool_name": "schedule_appointment",
+    "arguments": {
+      "student_id": "SV2026001",
+      "datetime_str": "14:00 15/09/2026",
+      "advisor_name": "PGS.TS Nguyễn Văn A"
+    },
+    "observation": {
+      "status": "SUCCESS",
+      "booking_id": "BK-SV2026001-99",
+      "student_id": "SV2026001",
+      "datetime": "14:00 15/09/2026",
+      "advisor": "PGS.TS Nguyễn Văn A",
+      "message": "Đặt lịch thành công cho sinh viên SV2026001 với PGS.TS Nguyễn Văn A vào lúc 14:00 15/09/2026."
+    },
+    "latency_ms": 12050.17
+  },
+  {
+    "step": 2,
+    "query": "Hãy đặt lịch tư vấn cho sinh viên SV2026001 với cố vấn PGS.TS Nguyễn Văn A lúc 14:00 ngày 15/09/2026.",
+    "action_type": "FINAL_ANSWER",
+    "thought": "Tổng hợp kết quả từ MCP Server thành công.",
+    "output": "Đặt lịch thành công cho sinh viên SV2026001 với PGS.TS Nguyễn Văn A vào lúc 14:00 15/09/2026.",
+    "latency_ms": 10.0
+  },
+  {
+    "step": 1,
+    "query": "Hãy tra cứu cố vấn của sinh viên SV2026001, sau đó đặt lịch tư vấn với cố vấn đó lúc 10:00 ngày 16/09/2026.",
+    "action_type": "TOOL_EXECUTION",
+    "tool_name": "academic_query",
+    "arguments": {
+      "student_id": "SV2026001"
+    },
+    "observation": {
+      "status": "SUCCESS",
+      "student_id": "SV2026001",
+      "data": {
+        "full_name": "Nguyễn Văn An",
+        "class": "AI-K4",
+        "gpa": 3.85,
+        "email": "an.nv@vinuni.edu.vn",
+        "status": "Đang học",
+        "advisor": "PGS.TS Nguyễn Văn A"
+      }
+    },
+    "latency_ms": 1744.04
+  },
+  {
+    "step": 2,
+    "query": "Hãy tra cứu cố vấn của sinh viên SV2026001, sau đó đặt lịch tư vấn với cố vấn đó lúc 10:00 ngày 16/09/2026.",
+    "action_type": "TOOL_EXECUTION",
+    "tool_name": "schedule_appointment",
+    "arguments": {
+      "student_id": "SV2026001",
+      "datetime_str": "10:00 16/09/2026",
+      "advisor_name": "PGS.TS Nguyễn Văn A"
+    },
+    "observation": {
+      "status": "SUCCESS",
+      "booking_id": "BK-SV2026001-99",
+      "student_id": "SV2026001",
+      "datetime": "10:00 16/09/2026",
+      "advisor": "PGS.TS Nguyễn Văn A",
+      "message": "Đặt lịch thành công cho sinh viên SV2026001 với PGS.TS Nguyễn Văn A vào lúc 10:00 16/09/2026."
+    },
+    "latency_ms": 526.46
+  },
+  {
+    "step": 3,
+    "query": "Hãy tra cứu cố vấn của sinh viên SV2026001, sau đó đặt lịch tư vấn với cố vấn đó lúc 10:00 ngày 16/09/2026.",
+    "action_type": "FINAL_ANSWER",
+    "thought": "Tổng hợp kết quả từ MCP Server thành công.",
+    "output": "Đặt lịch thành công cho sinh viên SV2026001 với PGS.TS Nguyễn Văn A vào lúc 10:00 16/09/2026.",
+    "latency_ms": 10.0
+  },
+  {
+    "step": 1,
+    "query": "Hãy tra cứu thông tin học vụ của sinh viên SV9999999.",
+    "action_type": "TOOL_EXECUTION",
+    "tool_name": "academic_query",
+    "arguments": {
+      "student_id": "SV9999999"
+    },
+    "observation": {
+      "status": "NOT_FOUND",
+      "message": "Không tìm thấy dữ liệu sinh viên có mã 'SV9999999'"
+    },
+    "latency_ms": 2644.0
+  },
+  {
+    "step": 2,
+    "query": "Hãy tra cứu thông tin học vụ của sinh viên SV9999999.",
+    "action_type": "FINAL_ANSWER",
+    "thought": "Tổng hợp kết quả từ MCP Server thành công.",
+    "output": "Không tìm thấy dữ liệu sinh viên có mã 'SV9999999'",
     "latency_ms": 10.0
   }
 ]

@@ -71,6 +71,11 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
     step = 0
     trace_logs = []
     tools_list = mcp_server.list_tools()
+    request_prompt = user_query
+    booking_requested = any(
+        phrase in user_query.lower()
+        for phrase in ("đặt lịch", "lịch tư vấn", "đặt hẹn", "hẹn tư vấn")
+    )
     
     while step < MAX_ITERATIONS:
         step += 1
@@ -78,7 +83,7 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
         print(f"\n--- 🔄 Vòng lặp ReAct Loop (Step {step}/{MAX_ITERATIONS}) ---")
         
         # Gọi LLM với Native Tool Calling Specs
-        llm_response = provider.generate_with_tools(user_query, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
+        llm_response = provider.generate_with_tools(request_prompt, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
         latency_ms = round((time.time() - step_start_time) * 1000, 2)
         
         thought = llm_response.get("thought", "Đang suy luận...")
@@ -144,6 +149,21 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 "observation": obs_data,
                 "latency_ms": latency_ms
             })
+
+            if (
+                tool_name == "academic_query"
+                and booking_requested
+                and obs_data.get("status") == "SUCCESS"
+            ):
+                advisor_name = obs_data.get("data", {}).get("advisor", "")
+                request_prompt = (
+                    f"Yêu cầu ban đầu: {user_query}\n"
+                    f"Kết quả tra cứu sinh viên: {json.dumps(obs_data, ensure_ascii=False)}\n"
+                    f"Hãy tiếp tục thực hiện yêu cầu đặt lịch bằng tool schedule_appointment. "
+                    f"Dùng cố vấn học tập '{advisor_name}' và giữ nguyên mã sinh viên cùng thời gian người dùng đã yêu cầu."
+                )
+                print("🧠 [Thought]: Đã xác nhận cố vấn. Tiếp tục gọi tool đặt lịch theo yêu cầu.")
+                continue
             
             # Kết thúc vòng lặp sau khi hoàn tất Observation và xuất Final Answer
             print(f"🧠 [Thought]: Đã nhận được dữ liệu từ MCP Server. Tổng hợp kết quả phản hồi.")
